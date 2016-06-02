@@ -47,3 +47,14 @@ popular_movies = pd.merge(movies, good_ratings)
 popular_comedies = popular_movies.loc[popular_movies['Comedy'] == 1]
 popular_comedies = (popular_comedies.groupby('title')).size().sort_values()
 
+#Stratification
+print(stratification("Action", 308))
+
+
+
+
+def stratification(category, userId):
+  userMovieLens = movie_ratings[movie_ratings.user_id==userId]
+  userMovieLensAction = userMovieLens[userMovieLens[category]==1]
+  
+  return userMovieLensAction.rating.value_counts()
