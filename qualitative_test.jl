@@ -2,6 +2,10 @@ using Recsys
 using DataFrames
 reload("Recsys")
 
+function createModel(data)
+  return Recsys.RegularedSVD(data);
+end
+
 genres = [:unknown, :action, :adventure, :animation, :childrens, :comedy, :crime, :documentary, :drama, :fantasy, :film_noir, :horror, :music, :mystery, :romance, :sci_fi, :thriller, :war, :western]
 header = [:movie_id, :title, :release_date, :video_release_date, :imdb_url]
 movies = readtable("ml-100k/u.item", header = false, separator = '|', names = vcat(header,genres))
@@ -57,8 +61,8 @@ end
 function noisy_recommend(user_id, contamine_list, n)
   contamined_ratings = Recsys.Dataset();
   contamined_ratings = contamine_dataset(contamined_ratings, user_id, contamine_list[:item], n)
-  contamined_rsvd = Recsys.RegularedSVD(contamined_ratings);
-  return recommend(contamined_rsvd, user_id, contamined_ratings.file)
+  contamined_model = createModel(contamined_ratings);
+  return recommend(contamined_model, user_id, contamined_ratings.file)
 end
 
 function get_popular_movies(ratings)
@@ -103,31 +107,52 @@ function precision_at_k(correct, predicted, k)
   return relevants_retrieved / relevants
 end
 
+function mae(correct, predicted)
+  sum = 0
+  for i = 1:size(correct)[1]
+    sum += abs(correct[i] - predicted[i])
+  end
+  return sum
+end
+
+function rmse(correct, predicted)
+  sum = 0
+  for i = 1:size(correct)[1]
+    sum += (correct[i] - predicted[i]) ^ 2
+  end
+  return sqrt(sum)
+end
+
+
+
 # Hipótese: Alto impacto ao adicionar um item que o usuário não gosta nas previsões futuras
 function hypothesys_1(user_id, category, noise_sizes)
   ratings = Recsys.Dataset();
   popular_movies = get_popular_movies(ratings)
 
-  rsvd = Recsys.RegularedSVD(ratings);
-  recommendations = recommend(rsvd, user_id, ratings.file)
+  model = createModel(ratings);
+  recommendations = recommend(model, user_id, ratings.file)
 
   popular_by_category = by_category(popular_movies, category)
 
   noisy_recommendations = []
-  ndcg_at_20 = []
-  precision_at_20 = []
+  #ndcg_at_20 = []
+  precisions_at_k = []
   for i in 1:length(noise_sizes)
     nr = noisy_recommend(user_id, popular_by_category, noise_sizes[i])
     push!(noisy_recommendations, nr)
 
-    ndcg = ndcg_at_k(recommendations, nr, 20)
-    push!(ndcg_at_20, ndcg)
+    #ndcg = ndcg_at_k(recommendations, nr, 20)
+    #push!(ndcg_at_20, ndcg)
 
-    precision = precision_at_k(recommendations, nr, 20)
-    push!(precision_at_20, precision)
+    precisions = []
+    for j = 1:20
+      push!(precisions, precision_at_k(recommendations, nr, j))
+    end
+    push!(precisions_at_k, precisions)
   end
 
-  result = Dict("recommendations" => recommendations, "noisy_recommendations" => noisy_recommendations, "ndcg_at_20" => ndcg_at_20, "precision_at_20" => precision_at_20)
+  result = Dict("recommendations" => recommendations, "noisy_recommendations" => noisy_recommendations, "precisions_at_k" => precisions_at_k)
   return result
 end
 
@@ -151,21 +176,20 @@ function hypothesys_2_alpha(user_id, category, margin, noise_size)
 
   contamine_dataset(train_ratings, user_id, popular_by_category[:item], noise_size)
 
-  noisy_rsvd = Recsys.RegularedSVD(train_ratings);
-  noisy_recommendations = recommend(noisy_rsvd, user_id, train_ratings.file)
+  noisy_model = createModel(train_ratings);
+  noisy_recommendations = recommend(noisy_model, user_id, train_ratings.file)
   test_noisy_recommendations_index = find(r-> in(r, test_movies[:movie_id]), noisy_recommendations[:item])
   test_noisy_recommendations = noisy_recommendations[test_noisy_recommendations_index, :]
 
-  rsvd = Recsys.RegularedSVD(ratings);
-  recommendations = recommend(rsvd, user_id, ratings.file)
+  model = createModel(ratings);
+  recommendations = recommend(model, user_id, ratings.file)
   test_recommendations_index = find(r-> in(r, test_movies[:movie_id]), recommendations[:item])
-  test_recommendations = recommendations[test_recommendations_index, :]
 
   result = Dict("test_recommendations" => test_recommendations, "test_noisy_recommendations" => test_noisy_recommendations)
   return result
 end
 
-function hypothesys_2(user_id, category, margin, noise_size)
+function hypothesys_2(user_id, category, margin, noise_sizes)
   ratings = Recsys.Dataset();
 
   category_movies = movies[movies[category] .== 1, :movie_id]
@@ -179,35 +203,57 @@ function hypothesys_2(user_id, category, margin, noise_size)
   shuffle_index = shuffle([1:size(category_user_ratings, 1)])
   test_ratings_index = category_user_ratings_index[find(r -> r >= size(category_user_ratings, 1) * margin, shuffle_index)]
   test_ratings = ratings.file[test_ratings_index, :]
+  sort!(test_ratings, cols = :item)
 
-  train_ratings = Recsys.Dataset();
-  deleterows!(train_ratings.file, test_ratings_index)
+  predictions_array = []
+  mae_array = []
+  rmse_array = []
 
-  popular_movies = get_popular_movies(train_ratings)
-  popular_by_category = by_category(popular_movies, category)
-  contamine_dataset(train_ratings, user_id, popular_by_category[:item], noise_size)
+  for i in 1:length(noise_sizes)
+    train_ratings = Recsys.Dataset();
+    deleterows!(train_ratings.file, test_ratings_index)
 
-  noisy_rsvd = Recsys.RegularedSVD(train_ratings);
-  noisy_recommendations = recommend(noisy_rsvd, user_id, train_ratings.file)
-  test_noisy_recommendations_index = find(r-> in(r, test_ratings[:item]), noisy_recommendations[:item])
-  test_noisy_recommendations = noisy_recommendations[test_noisy_recommendations_index, :]
+    model = createModel(train_ratings);
 
-  rsvd = Recsys.RegularedSVD(ratings);
-  recommendations = recommend(rsvd, user_id, train_ratings.file)
-  test_recommendations_index = find(r-> in(r, test_ratings[:item]), recommendations[:item])
-  test_recommendations = recommendations[test_recommendations_index, :]
+    popular_movies = get_popular_movies(train_ratings)
+    popular_by_category = by_category(popular_movies, category)
+    contamine_dataset(train_ratings, user_id, popular_by_category[:item], noise_sizes[i])
+    noisy_model = createModel(train_ratings);
 
-  result = Dict("test_noisy_recommendations" => test_noisy_recommendations, "test_recommendations" => test_recommendations)
+    data = ones(Int32, ( size(test_ratings)[1], 2) )
+    data[:,1] = data[:,1] * user_id
+    data[:,2] = test_ratings[:item]
+
+    items = test_ratings[:item]
+    prediction = model.predict(data)
+    noisy_prediction = noisy_model.predict(data)
+    ratings = test_ratings[:rating]
+
+    result = hcat(items, prediction, noisy_prediction, ratings)
+
+    df = DataFrame()
+    df[:item] = int(result[:, 1])
+    df[:prediction] = result[:, 2]
+    df[:noisy_prediction] = result[:, 3]
+    df[:rating] = int(result[:, 4])
+    df[:title] = movies[items, :title]
+
+    push!(predictions_array, df)
+    push!(mae_array, mae(df[:prediction], df[:noisy_prediction]))
+    push!(rmse_array, rmse(df[:prediction], df[:noisy_prediction]))
+  end
+
+  result = Dict("noise_mae" => mae_array, "noise_rmse" => rmse_array, "predictions" => predictions_array)
   return result
 end
 
 margin = 0.9
-user_id = 13
-category = :horror
-noise_size = 1
+user_id = 269
+category = :action
+noise_sizes = [1, 5, 15]
 
 # Hipótese: Alto impacto ao adicionar um item que o usuário não gosta nas previsões futuras
-h1 = hypothesys_1(user_id, category, [1, 2, 3, 4, 5])
+h1 = hypothesys_1(user_id, category, noise_sizes)
 
 # Hipótese: Adicionando um item de uma categoria que ele não goste irá afetar na previsão dos filmes dessa categoria que ele viu
-h2 = hypothesys_2(user_id, category, margin, noise_size)
+h2 = hypothesys_2(user_id, category, margin, noise_sizes)
