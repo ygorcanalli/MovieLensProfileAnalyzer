@@ -156,39 +156,6 @@ function hypothesys_1(user_id, category, noise_sizes)
   return result
 end
 
-function hypothesys_2_alpha(user_id, category, margin, noise_size)
-  ratings = Recsys.Dataset();
-
-  category_movies = movies[movies[category] .== 1, :]
-  shuffle_index = shuffle([1:size(category_movies, 1)])
-
-  test_movies_index = find(r -> r >= size(category_movies, 1) * margin, shuffle_index)
-  test_movies = animation_movies[test_movies_index, :]
-
-  test_ratings_index = find(r-> in(r, test_movies[:movie_id]), ratings.file[:item])
-  test_ratings = ratings.file[test_ratings_index, :]
-
-  train_ratings = Recsys.Dataset();
-  deleterows!(train_ratings.file, test_ratings_index)
-
-  popular_movies = get_popular_movies(train_ratings)
-  popular_by_category = by_category(popular_movies, category)
-
-  contamine_dataset(train_ratings, user_id, popular_by_category[:item], noise_size)
-
-  noisy_model = createModel(train_ratings);
-  noisy_recommendations = recommend(noisy_model, user_id, train_ratings.file)
-  test_noisy_recommendations_index = find(r-> in(r, test_movies[:movie_id]), noisy_recommendations[:item])
-  test_noisy_recommendations = noisy_recommendations[test_noisy_recommendations_index, :]
-
-  model = createModel(ratings);
-  recommendations = recommend(model, user_id, ratings.file)
-  test_recommendations_index = find(r-> in(r, test_movies[:movie_id]), recommendations[:item])
-
-  result = Dict("test_recommendations" => test_recommendations, "test_noisy_recommendations" => test_noisy_recommendations)
-  return result
-end
-
 function hypothesys_2(user_id, category, margin, noise_sizes)
   ratings = Recsys.Dataset();
 
