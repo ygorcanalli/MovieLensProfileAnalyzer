@@ -133,6 +133,16 @@ function hypothesys_1(user_id, category, noise_sizes)
   model = createModel(ratings);
   recommendations = recommend(model, user_id, ratings.file)
 
+  #renomear recommendations colocando o campo prediction para Original_prediction
+  rename!(recommendations, :prediction, :original_prediction)
+  recommendations[:original_position] = [1:size(recommendations, 1)]
+
+
+  #adicionar um campo ao resultado desse join que é |rating-original_rating|
+  size([1:20], 1)
+  #ordenar por essa campo decrescentemente e por rating ascendentemente
+
+
   popular_by_category = by_category(popular_movies, category)
 
   noisy_recommendations = []
@@ -140,7 +150,16 @@ function hypothesys_1(user_id, category, noise_sizes)
   precisions_at_k = []
   for i in 1:length(noise_sizes)
     nr = noisy_recommend(user_id, popular_by_category, noise_sizes[i])
-    push!(noisy_recommendations, nr)
+    nr[:position] = [1:size(nr, 1)]
+    top_nr = nr[[1:20], :]
+    #realizar um join de recommendations com noisy_recommendations.
+    rec_noisy_rec = join(recommendations, top_nr, on = :item, kind = :inner)
+    rec_noisy_rec[:position_difference] = rec_noisy_rec[:, :original_position] - rec_noisy_rec[:, :position]
+
+    sort!(rec_noisy_rec, cols = [:position_difference, :position], rev = true)
+
+    #push!(noisy_recommendations, nr)
+    push!(noisy_recommendations, rec_noisy_rec)
 
     #ndcg = ndcg_at_k(recommendations, nr, 20)
     #push!(ndcg_at_20, ndcg)
@@ -215,12 +234,37 @@ function hypothesys_2(user_id, category, margin, noise_sizes)
 end
 
 margin = 0.9
-user_id = 269
-category = :action
-noise_sizes = [1, 5, 15]
+user_id = 609
+category = :comedy
+noise_sizes = [1, 2, 3, 4, 5, 10, 15]
 
 # Hipótese: Alto impacto ao adicionar um item que o usuário não gosta nas previsões futuras
 h1 = hypothesys_1(user_id, category, noise_sizes)
 
+for row in eachrow(h1["noisy_recommendations"][7])
+   println(row)
+end
+
+for i = [1:size(noise_sizes,1)]
+  sort!(h1["noisy_recommendations"][i], cols = [:position], rev = false)
+end
+
+df = DataFrame()
+df[:original_position] = [1:20]
+
+for i = [1:size(noise_sizes,1)]
+  label = Symbol(string("r", noise_sizes[i]))
+  df[label] = h1["noisy_recommendations"][i][:position_difference]
+end
+
+
+
+
+
+
+
+
+
 # Hipótese: Adicionando um item de uma categoria que ele não goste irá afetar na previsão dos filmes dessa categoria que ele viu
 h2 = hypothesys_2(user_id, category, margin, noise_sizes)
+print(h2)
