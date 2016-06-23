@@ -34,6 +34,14 @@ lens = pd.merge(movie_ratings, users)
 
 ratings_count = ratings.groupby('user_id').count()
 
+user_categories_percent = pd.merge(pd.merge(movies, ratings), users)
+user_categories_percent = user_categories_percent[concatenate([['user_id'], genre_names])]
+user_categories_percent = user_categories_percent.groupby('user_id').sum()
+
+for k in user_categories_percent:
+	user_categories_percent[k] = user_categories_percent[k] / ratings_count['movie_id']
+
+
 user_likes = pd.merge(pd.merge(movies, good_ratings), users)
 user_likes = user_likes[concatenate([['user_id'], genre_names])]
 user_likes = user_likes.groupby('user_id').sum()
@@ -45,11 +53,13 @@ user_dislikes = user_dislikes.groupby('user_id').sum()
 user_preferences = (user_likes - user_dislikes).dropna()
 non_frequent_user_preferences = user_preferences[ratings_count["rating"] < 50]
 
+
+for i in user_preferences.index:
+	user_preferences.loc[i] = user_preferences.loc[i] * user_categories_percent.loc[i]
+
 popular_movies = pd.merge(movies, good_ratings)
 popular_comedies = popular_movies.loc[popular_movies["Comedy"] == 1]
 popular_comedies = (popular_comedies.groupby('movie_id')).size().sort_values(ascending=False).head(n=20)
-
-
 
 
 def stratification(category, userId):    
